@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Hospital & Book Bed - Driver</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { background: #0f172a; padding: 20px; color: #e2e8f0; }
+        .nav { background: #1e293b; padding: 12px 24px; border-radius: 50px; display: inline-block; margin-bottom: 20px; }
+        .nav a { color: #94a3b8; text-decoration: none; margin: 0 15px; font-weight: 500; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { margin-bottom: 10px; }
+        .sub { margin-bottom: 30px; color: #94a3b8; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .hospitals-list { background: #1e293b; border-radius: 24px; padding: 24px; }
+        .hospital-card { background: #0f172a; border-radius: 16px; padding: 16px; margin-bottom: 12px; cursor: pointer; transition: 0.2s; border: 2px solid transparent; }
+        .hospital-card.selected { border-color: #10b981; background: #1e293b; }
+        .hospital-card h3 { color: #38bdf8; margin-bottom: 8px; }
+        .hospital-detail { font-size: 14px; margin: 5px 0; }
+        .beds { font-weight: bold; }
+        .beds.critical { color: #ef4444; }
+        .beds.warning { color: #f59e0b; }
+        .beds.ok { color: #10b981; }
+        .map-container { background: #1e293b; border-radius: 24px; padding: 24px; }
+        #map { height: 450px; border-radius: 20px; margin-bottom: 20px; background: #334155; }
+        .btn { background: #3b82f6; color: white; border: none; padding: 14px 24px; border-radius: 40px; font-size: 16px; cursor: pointer; width: 100%; }
+        .btn:disabled { background: #475569; cursor: not-allowed; }
+        .btn-success { background: #10b981; }
+        .status-box { background: #0f172a; padding: 12px; border-radius: 12px; margin-bottom: 20px; font-size: 14px; }
+        .back-link { display: inline-block; margin-top: 20px; color: #38bdf8; text-decoration: none; }
+        .error { color: #f87171; }
+        @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDEmS46Yt8rcRYUyRBJBAdFsejtuKW4XKQ&libraries=places"></script></head>
+<body>
+<div style="text-align: center;">
+    <div class="nav">
+        <a href="/">🏠 Patient</a>
+        <a href="/driver">🚑 Driver Dashboard</a>
+        <a href="/driver/hospitals" class="active">🏥 Hospital Selection</a>
+    </div>
+</div>
+<div class="container">
+    <h1>🏥 Hospital & Bed Selection</h1>
+    <div class="sub">Select a hospital to book a bed. The map will show driving directions from your ambulance.</div>
+
+    <div class="grid">
+        <div class="hospitals-list">
+            <h3>📋 Available Hospitals (7 entries)</h3>
+            <div id="hospitalsContainer">Loading hospitals...</div>
+        </div>
+        <div class="map-container">
+            <div id="map">Loading map...</div>
+            <button id="bookBtn" class="btn" disabled>📋 Book Selected Hospital & Show Route</button>
+            <div id="bookingStatus" class="status-box" style="margin-top: 16px;"></div>
+            <a href="/driver" class="back-link">← Back to Dashboard</a>
+        </div>
+    </div>
+</div>
+
+<script>
+    let hospitals = [];
+    let selectedHospitalId = null;
+    let map, directionsRenderer;
+    let ambulanceLat = 12.975, ambulanceLng = 77.580;
+    let patientLat = null, patientLng = null;
+    let requestId = null;
+    let ambulanceId = null;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    ambulanceId = urlParams.get('ambulance_id');
+    requestId = urlParams.get('request_id');
+    const patLat = urlParams.get('patient_lat');
+    const patLng = urlParams.get('patient_lng');
+    if (patLat && patLng) {
+        patientLat = parseFloat(patLat);
+        patientLng = parseFloat(patLng);
+    }
+
+    async function fetchAmbulanceLocation() {
+        if (!ambulanceId) return;
+        try {
+            const res = await fetch(`/api/ambulance_location/${ambulanceId}`);
+            if (res.ok) {
+                const data = await res.json();
+                ambulanceLat = data.lat;
+                ambulanceLng = data.lng;
+            }
+        } catch(e) { console.warn(e); }
+    }
+
+    async function fetchHospitals() {
+        const res = await fetch('/api/hospitals');
+        hospitals = await res.json();
+        renderHospitalList();
+        if (hospitals.length > 0 && !selectedHospitalId) {
+            selectedHospitalId = hospitals[0].id;
+            renderHospitalList();
+            enableBookButton();
+        }
+    }
+
+    function getBedClass(available) {
+        if (available <= 5) return 'critical';
+        if (available <= 20) return 'warning';
+        return 'ok';
+    }
+
+    function renderHospitalList() {
+        const container = document.getElementById('hospitalsContainer');
+        if (!hospitals.length) { container.innerHTML = '<p>No hospitals found.</p>'; return; }
+        container.innerHTML = hospitals.map(h => `
+            <div class="hospital-card ${selectedHospitalId === h.id ? 'selected' : ''}" onclick="selectHospital(${h.id})">
+                <h3>🏥 ${h.name}</h3>
+                <div class="hospital-detail">📍 ${h.lat.toFixed(4)}, ${h.lng.toFixed(4)}</div>
+                <div class="hospital-detail">🛏️ <span class="beds ${getBedClass(h.available_beds)}">${h.available_beds} / ${h.total_beds} beds available</span></div>
+            </div>
+        `).join('');
+    }
+
+    window.selectHospital = (id) => {
+        selectedHospitalId = id;
+        renderHospitalList();
+        enableBookButton();
+    };
+
+    function enableBookButton() {
+        const btn = document.getElementById('bookBtn');
+        btn.disabled = false;
+        btn.classList.add('btn-success');
+    }
+
+    async function bookAndNavigate() {
+        if (!selectedHospitalId) {
+            alert('Please select a hospital first.');
+            return;
+        }
+        const hospital = hospitals.find(h => h.id === selectedHospitalId);
+        if (!hospital) return;
+        
+        if (hospital.available_beds <= 0) {
+            document.getElementById('bookingStatus').innerHTML = '<span class="error">❌ No beds available at this hospital.</span>';
+            return;
+        }
+
+        if (requestId) {
+            const bookingRes = await fetch('/api/book_bed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ request_id: parseInt(requestId), hospital_id: selectedHospitalId })
+            });
+            const bookingData = await bookingRes.json();
+            if (bookingRes.ok) {
+                document.getElementById('bookingStatus').innerHTML = `✅ ${bookingData.message}<br>🚑 Route from ambulance to hospital shown below.`;
+                drawRouteFromAmbulanceToHospital(hospital);
+            } else {
+                document.getElementById('bookingStatus').innerHTML = `<span class="error">❌ Booking failed: ${bookingData.error}</span>`;
+            }
+        } else {
+            document.getElementById('bookingStatus').innerHTML = `ℹ️ No active emergency request. Showing directions for demonstration.`;
+            drawRouteFromAmbulanceToHospital(hospital);
+        }
+    }
+
+    function initMap() {
+        const mapDiv = document.getElementById('map');
+        map = new google.maps.Map(mapDiv, { zoom: 12, center: { lat: ambulanceLat, lng: ambulanceLng } });
+        directionsRenderer = new google.maps.DirectionsRenderer();
+        directionsRenderer.setMap(map);
+        new google.maps.Marker({ position: { lat: ambulanceLat, lng: ambulanceLng }, map: map, title: "Your Ambulance", icon: { url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png" } });
+        if (patientLat && patientLng) {
+            new google.maps.Marker({ position: { lat: patientLat, lng: patientLng }, map: map, title: "Patient Location", icon: { url: "http://maps.google.com/mapfiles/ms/icons/red-dot.png" } });
+        }
+    }
+
+    function drawRouteFromAmbulanceToHospital(hospital) {
+        if (!map) initMap();
+        const directionsService = new google.maps.DirectionsService();
+        directionsService.route({
+            origin: { lat: ambulanceLat, lng: ambulanceLng },
+            destination: { lat: hospital.lat, lng: hospital.lng },
+            travelMode: google.maps.TravelMode.DRIVING,
+            drivingOptions: { trafficModel: google.maps.TrafficModel.BEST_GUESS }
+        }, (result, status) => {
+            if (status === "OK") {
+                directionsRenderer.setDirections(result);
+                const bounds = new google.maps.LatLngBounds();
+                bounds.extend({ lat: ambulanceLat, lng: ambulanceLng });
+                bounds.extend({ lat: hospital.lat, lng: hospital.lng });
+                map.fitBounds(bounds);
+            } else {
+                document.getElementById('bookingStatus').innerHTML += `<br><span class="error">⚠️ Directions failed: ${status}</span>`;
+            }
+        });
+    }
+
+    document.getElementById('bookBtn').addEventListener('click', bookAndNavigate);
+    
+    async function setup() {
+        await fetchAmbulanceLocation();
+        await fetchHospitals();
+        initMap();
+    }
+    setup();
+</script>
+</body>
+</html>

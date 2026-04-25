@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Dashboard - Ambulance Coordination</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { background: #0f172a; padding: 20px; color: #e2e8f0; }
+        .nav { background: #1e293b; padding: 12px 24px; border-radius: 50px; display: inline-block; margin-bottom: 20px; }
+        .nav a { color: #94a3b8; text-decoration: none; margin: 0 15px; font-weight: 500; }
+        .nav a.active { color: white; }
+        .dashboard { max-width: 1200px; margin: 0 auto; }
+        h1 { margin-bottom: 20px; font-size: 28px; }
+        .card { background: #1e293b; border-radius: 24px; padding: 24px; margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.3); }
+        .request-card { background: #0f172a; border-radius: 16px; padding: 16px; margin: 16px 0; }
+        .badge { background: #ef4444; color: white; padding: 4px 12px; border-radius: 40px; font-size: 12px; width: fit-content; margin-bottom: 12px; }
+        .info-row { margin: 8px 0; }
+        .btn { background: #3b82f6; color: white; border: none; padding: 12px 24px; border-radius: 40px; font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; margin-top: 16px; }
+        .btn-large { background: #10b981; font-size: 18px; }
+        select, button { padding: 8px 16px; border-radius: 40px; border: none; font-weight: 500; cursor: pointer; }
+    </style>
+</head>
+<body>
+<div style="text-align: center;">
+    <div class="nav">
+        <a href="/">🏠 Patient</a>
+        <a href="/driver" class="active">🚑 Driver Dashboard</a>
+    </div>
+</div>
+<div class="dashboard">
+    <h1>🚑 Ambulance Driver Command Center</h1>
+    
+    <div class="card">
+        <label>Select Your Ambulance:</label>
+        <select id="ambulanceSelect">
+            <option value="1">AMB-001</option>
+            <option value="2">AMB-002</option>
+            <option value="3">AMB-003</option>
+        </select>
+        <button id="refreshBtn">🔄 Refresh</button>
+    </div>
+
+    <div class="card">
+        <h3>📍 Current Active Emergency</h3>
+        <div id="activeRequestArea">
+            <div class="request-card">No active request. Waiting for SOS...</div>
+        </div>
+        <div id="hospitalAction" style="display: none;">
+            <a href="#" id="hospitalLink" class="btn btn-large">🏥 View Hospitals & Book Bed</a>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentAmbulanceId = 1;
+    const ambulanceSelect = document.getElementById('ambulanceSelect');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const activeRequestArea = document.getElementById('activeRequestArea');
+    const hospitalActionDiv = document.getElementById('hospitalAction');
+    const hospitalLink = document.getElementById('hospitalLink');
+
+    async function fetchActiveRequest() {
+        const ambulanceId = currentAmbulanceId;
+        const res = await fetch(`/api/ambulance/${ambulanceId}/active_request`);
+        const data = await res.json();
+        if (data.active) {
+            const activeRequest = {
+                request_id: data.request_id,
+                patient_lat: data.patient_lat,
+                patient_lng: data.patient_lng,
+                status: data.status,
+                booked_hospital: data.hospital_booked
+            };
+            activeRequestArea.innerHTML = `
+                <div class="request-card">
+                    <div class="badge">🚨 ACTIVE RESPONSE</div>
+                    <div class="info-row"><strong>Request ID:</strong> ${activeRequest.request_id}</div>
+                    <div class="info-row"><strong>Patient Location:</strong> (${activeRequest.patient_lat.toFixed(4)}, ${activeRequest.patient_lng.toFixed(4)})</div>
+                    <div class="info-row"><strong>Status:</strong> ${activeRequest.status === 'ambulance_assigned' ? '🟡 Enroute to patient' : '🟢 Hospital bed booked'}</div>
+                    ${activeRequest.booked_hospital ? `<div class="info-row"><strong>Booked Hospital:</strong> ${activeRequest.booked_hospital.name}</div>` : ''}
+                </div>
+            `;
+            if (activeRequest.status === 'ambulance_assigned') {
+                hospitalLink.href = `/driver/hospitals?ambulance_id=${ambulanceId}&request_id=${activeRequest.request_id}&patient_lat=${activeRequest.patient_lat}&patient_lng=${activeRequest.patient_lng}`;
+                hospitalActionDiv.style.display = 'block';
+            } else {
+                hospitalActionDiv.style.display = 'none';
+            }
+        } else {
+            activeRequestArea.innerHTML = `<div class="request-card">✅ No active request. Standing by.</div>`;
+            hospitalActionDiv.style.display = 'none';
+        }
+    }
+
+    ambulanceSelect.addEventListener('change', (e) => {
+        currentAmbulanceId = parseInt(e.target.value);
+        fetchActiveRequest();
+    });
+    refreshBtn.addEventListener('click', fetchActiveRequest);
+    setInterval(fetchActiveRequest, 5000);
+    fetchActiveRequest();
+</script>
+</body>
+</html>
