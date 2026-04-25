@@ -232,7 +232,7 @@ export default function DriverView() {
                 {booking.tracking_url}
               </a>
             </div>
-
+            
             {/* Action buttons */}
             {step === 'en_route' && (
               <button className="btn btn-blue btn-full" style={{ padding: '16px', fontSize: 15 }} onClick={handleArrived}>
